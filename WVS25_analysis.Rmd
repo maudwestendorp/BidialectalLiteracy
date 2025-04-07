@@ -1,0 +1,792 @@
+---
+title: "Exploring the impact of Norwegian bidialectal literacy on executive functioning and academic performance"
+author: "Maud Westendorp"
+date: "2024-04-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Load packages:
+library(tidyverse)
+library(plotly)
+library(stats)
+library(lme4)
+library(ggpubr)
+library(broom)
+library(lm.beta)
+library(afex)
+library(emmeans)
+```
+
+```{r Load datasets}
+# Path for main analysis:
+mainDir <- "~/Library/CloudStorage/OneDrive-UiTOffice365/BidialectalLiteracy"
+setwd(mainDir)
+
+# read in EF data
+stroop <- read_delim("./data/Stroop.csv", delim = "\t", 
+                     escape_double = FALSE, trim_ws = TRUE)
+flanker <- read_delim("./data/Flanker.csv", delim = "\t", 
+                      escape_double = FALSE, trim_ws = TRUE)
+lexd <- read_delim("./data/LexD.csv", delim = "\t", 
+                   escape_double = FALSE, trim_ws = TRUE)
+span <- read_delim("./data/Spanboard.csv", delim = ";", 
+                   escape_double = FALSE, trim_ws = TRUE)
+
+# read in exam data
+exam <- read_delim("./data/ExamresultsCODE.csv")
+```
+
+```{r Prep for graphs}
+#set sizes for labels etc. for all graphs
+fontsizes <- theme(
+        plot.title = element_text(size = 20),       # Title text size
+        axis.title.x = element_text(size = 16),     # X-axis title text size
+        axis.title.y = element_text(size = 16),     # Y-axis title text size
+        axis.text.x = element_text(size = 14),      # X-axis text size
+        axis.text.y = element_text(size = 14),      # Y-axis text size
+        legend.title = element_text(size = 16),     # Legend title text size
+        legend.text = element_text(size = 14),      # Legend text size
+        strip.text = element_text(size = 16)        # Facet label text size
+    )
+```
+
+#Participant characteristics
+```{r Participant data}
+spss <- read_delim("/Users/mwe036/Downloads/Bidialect resubmission 2024/SPSSdataALL.csv",
+     delim = "\t", escape_double = FALSE, trim_ws = TRUE)
+
+# Convert necessary columns to factors
+spss <- spss %>% 
+  mutate_at(vars(NynBok, grade, gender), as.factor)
+
+spss$mumwork <- as.factor(ifelse(is.na(spss$mumwork), 
+                                 NA, ifelse(spss$mumwork == 1, "yes", "no")))
+spss$parents <- as.factor(ifelse(spss$parents == 2, "yes", "no"))
+spss$language <- as.factor(ifelse(spss$language == 2, "yes", "no"))
+
+# Filter data by grade
+grade1_data <- subset(spss, grade == "grade1")
+grade5_data <- subset(spss, grade == "grade5")
+grade8_data <- subset(spss, grade == "grade8")
+
+# Gender
+table_gender_grade1 <- table(grade1_data$NynBok, grade1_data$gender)
+chisq.test(table_gender_grade1)
+table_gender_grade5 <- table(grade5_data$NynBok, grade5_data$gender)
+chisq.test(table_gender_grade5)
+table_gender_grade8 <- table(grade8_data$NynBok, grade8_data$gender)
+chisq.test(table_gender_grade8)
+
+# Age
+spss %>% group_by(NynBok, grade) %>% 
+  summarise(meanage = mean(age, na.rm = T)) %>% 
+  arrange(grade)
+
+wilcox.test(age ~ NynBok, data = grade1_data, na.rm = TRUE)
+wilcox.test(age ~ NynBok, data = grade5_data, na.rm = TRUE, 
+            exact = FALSE)
+wilcox.test(age ~ NynBok, data = grade8_data, na.rm = TRUE)
+
+# Maternal employment
+table_mumwork_grade5 <- table(grade5_data$NynBok, grade5_data$mumwork)
+fisher.test(table_mumwork_grade5)
+table_mumwork_grade8 <- table(grade8_data$NynBok, grade8_data$mumwork)
+fisher.test(table_mumwork_grade8)
+
+# Co-parent household
+table_parents_grade1 <- table(grade1_data$NynBok, grade1_data$parents)
+chisq.test(table_parents_grade1)
+table_parents_grade5 <- table(grade5_data$NynBok, grade5_data$parents)
+chisq.test(table_parents_grade5)
+table_parents_grade8 <- table(grade8_data$NynBok, grade8_data$parents)
+chisq.test(table_parents_grade8)
+
+# Additional language
+table_language_grade1 <- table(grade1_data$NynBok, grade1_data$language)
+chisq.test(table_language_grade1)
+table_language_grade5 <- table(grade5_data$NynBok, grade5_data$language)
+fisher.test(table_language_grade5)
+table_language_grade8 <- table(grade8_data$NynBok, grade8_data$language)
+chisq.test(table_language_grade8)
+
+# Writing ability
+spss %>% group_by(NynBok, grade) %>% 
+  summarise(writing = mean(write, na.rm = T)) %>% 
+  arrange(grade)
+
+wilcox.test(write ~ NynBok, data = grade1_data, na.rm = TRUE)
+wilcox.test(write ~ NynBok, data = grade5_data, na.rm = TRUE,
+            exact = FALSE)
+wilcox.test(write ~ NynBok, data = grade8_data, na.rm = TRUE)
+
+# Attention ability
+spss %>% group_by(grade, NynBok) %>% 
+  summarise(attention = mean(attention, na.rm = T))
+
+wilcox.test(attention ~ NynBok, data = grade1_data, na.rm = TRUE)
+wilcox.test(attention ~ NynBok, data = grade5_data, na.rm = TRUE,
+            exact = FALSE)
+wilcox.test(attention ~ NynBok, data = grade8_data, na.rm = TRUE)
+```
+
+#EF results
+```{r Spanboard}
+# inspect
+head(span)
+span$NynBok <- as.factor(span$NynBok)
+span %>%  group_by(grade) %>% 
+                  summarise(meanspan =mean(span_corr, na.rm=T))
+
+# summarise data for plot
+mean.span <- span %>% group_by(NynBok, grade) %>% 
+            summarise(mean_span = mean(span_corr,na.rm=T),
+                      se_span = sd(span_corr, na.rm = T) / sqrt(n()))
+
+# plot summarised data
+ggplot(data = mean.span, 
+       aes(x = grade,
+           y = mean_span,
+           group = NynBok, 
+           color = NynBok)) + 
+    geom_point(size = 2) +
+    geom_line(size = 2) +
+    geom_errorbar(aes(ymin=mean_span-se_span, 
+                      ymax=mean_span+se_span, 
+                      colour = NynBok), width=.2, size = 2) +
+    xlab('') +
+    scale_color_manual("Language \ngroup", 
+                       values = c("#440154FF", "#2A788EFF"), 
+                       labels = c("Bokmål", "Nynorsk")) +
+    ylab('Total correctly recalled dots') +
+    fontsizes
+
+# ANOVAs
+span_aov <- aov_car(span_corr ~ grade * NynBok + Error(code), 
+                data = span)
+
+# posthoc t-tests grade 8:
+span_aov8 <- aov_car(span_corr ~ NynBok + Error(code), 
+                 data = subset(span, grade == "grade8"))
+span8.emm <- emmeans(span_aov8, ~NynBok)
+span8.emm
+pairs(span8.emm, adjust="bonferroni")
+```
+
+```{r Stroop}
+# inspect
+head(stroop)    
+stroop %>% group_by(grade, NynBok) %>% 
+           summarise(meanRT = mean(StroopRT,na.rm=T),
+                     SD = sd(StroopRT, na.rm=T))
+
+# ANOVAs
+stroopRT_aov <- aov_car(StroopRT ~ grade*NynBok + Error(code), data = stroop)
+aov_car(CorrPerc ~ grade*NynBok + Error(code), data = stroop)
+
+# posthoc t-tests with grade 8-subset for RTs and accuracy:
+RTstroop_aov8 <- aov_car(StroopRT ~ NynBok + Error(code), 
+                 data = subset(stroop, grade == "grade8"))
+RTstroop8.emm <- emmeans(RTstroop_aov8, ~NynBok)
+RTstroop8.emm
+pairs(RTstroop8.emm, adjust="bonferroni")
+
+ACCstroop_aov8 <- aov_car(CorrPerc ~ NynBok + Error(code), 
+                 data = subset(stroop, grade == "grade8"))
+ACCstroop8.emm <- emmeans(ACCstroop_aov8, ~NynBok)
+ACCstroop8.emm
+pairs(ACCstroop8.emm, adjust="bonferroni")
+```
+
+```{r Stroop visualisation}
+# summarise data for plot
+mean.RT_stroop <- stroop %>% 
+    group_by(NynBok, grade) %>% 
+    summarize(meanRT = mean(StroopRT),
+              se = sd(StroopRT) / sqrt(n()),
+              meanACC = mean(CorrPerc),
+              seACC = sd(CorrPerc) / sqrt(n()))
+
+# draw graph for RT and accuracy:
+ggplot(data = mean.RT_stroop, 
+       aes(x = grade,
+       #    y = meanRT,
+       y = meanACC,
+           group = NynBok, 
+           color = NynBok)) + 
+    geom_point(size = 2) +
+    geom_line(size = 2) +
+    # geom_errorbar(aes(ymin=meanRT-se, 
+    #                   ymax=meanRT+se, 
+    geom_errorbar(aes(ymin=meanACC-seACC, 
+                      ymax=meanACC+seACC,
+                      colour = NynBok), width=.2, size = 2) +
+    scale_color_manual("Language \ngroup", 
+                       values = c("#440154FF", "#2A788EFF"), 
+                       labels = c("Bokmål", "Nynorsk")) +
+    xlab('') +
+  #  ylab('Reaction time (ms)') +
+    ylab('Accuracy (%)') +
+    fontsizes
+```
+
+```{r Flanker}
+# inspect
+head(flanker)   
+flanker %>% group_by(grade, NynBok) %>% 
+            filter(CorrPerc > 1) %>% 
+            summarise(meanRT = mean(FlankerRTsnitt,na.rm=T))
+
+# summarise
+meanRT_flanker <- flanker %>% group_by(grade, NynBok) %>% 
+            filter(CorrPerc > 1) %>% 
+            summarise(Con_RT = mean(FlankerConMeanRT,na.rm=T),
+                      Inc_RT = mean(FlaIncMeanRT,na.rm=T))
+
+# reshape data to long format
+meanRT_long <- meanRT_flanker %>%
+    pivot_longer(cols = c(Con_RT, Inc_RT), 
+                 names_to = "Condition", values_to = "RT")
+
+# calculate Flanker effect
+flanker <- flanker %>% 
+       mutate(Feff = FlaIncMeanRT - FlankerConMeanRT)
+
+flanker %>% group_by(grade, NynBok) %>% 
+            summarise(mean_eff = mean(Feff,na.rm=T)) %>% 
+            arrange(NynBok)
+
+# make long df with Flanker effect
+flanker_long <- flanker %>%
+  pivot_longer(
+    cols = c(#FlankerConRT, FlaIncRT, 
+             FlankerConMeanRT, FlaIncMeanRT),
+    names_to = "variable",
+    values_to = "value") %>%
+  separate(variable, into = c("condition", "RTType"), 
+           sep = "(?<=Con|Inc)") %>%
+  pivot_wider(
+    names_from = "RTType",
+    values_from = "value") %>%
+  mutate(condition = if_else(condition == "FlankerCon", "Con", "Inc"))
+
+flanker_long %>% group_by(condition, NynBok) %>%
+                 summarise(meanRT = mean(MeanRT, na.rm=T)) %>% 
+                 arrange(NynBok)
+
+flanker_long %>% group_by(grade, NynBok) %>% 
+                 summarise(Feff = mean(Feff, na.rm=T)) %>% 
+                 arrange(grade)
+
+# ANOVAs RT
+aov_car(Feff ~ grade*NynBok + Error(code), data = flanker_long)
+aov_car(CorrPerc ~ grade*NynBok + Error(code), data = flanker_long)
+
+flanker_long %>%  group_by(grade, condition, NynBok) %>% 
+                  summarise(meanRT =mean(MeanRT, na.rm=T)) %>% 
+                  arrange(NynBok)
+
+# posthoc t-tests grade 8:
+RTflanker_aov8 <- aov_car(FlankerRTsnitt ~ NynBok + Error(code), 
+                 data = subset(flanker, grade == "grade8"))
+RTflanker8.emm <- emmeans(RTflanker_aov8, ~NynBok)
+RTflanker8.emm
+pairs(RTflanker8.emm, adjust="bonferroni")
+
+ACCflanker_aov8 <- aov_car(CorrPerc ~ NynBok + Error(code), 
+                 data = subset(flanker, grade == "grade8"))
+ACCflanker8.emm <- emmeans(ACCflanker_aov8, ~NynBok)
+ACCflanker8.emm
+pairs(ACCflanker8.emm, adjust="bonferroni")
+
+Feff_aov8 <- aov_car(Feff ~ NynBok + Error(code), 
+                 data = subset(flanker, grade == "grade8"))
+Feff8.emm <- emmeans(Feff_aov8, ~NynBok)
+Feff8.emm
+pairs(Feff8.emm, adjust="bonferroni")
+
+# check for speed-accuracy trade-off:
+fl_speedacc <- flanker %>% 
+  filter(grade == "grade8") %>% 
+  group_by(code) %>% 
+  summarise(meanACC =mean(CorrPerc,na.rm=T),
+            meanRT =mean(FlankerRTsnitt,na.rm=T))
+
+# get speed-acc correlation
+fl_speedacc %>%
+           summarise(correlation = cor(meanACC, meanRT))
+
+# draw speed-acc relationship
+ggplot(fl_speedacc, aes(x = meanACC, y = meanRT)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE) +
+    labs(title = "Speed-Accuracy Trade-off in Flanker task",
+         x = "Accuracy Score",
+         y = "Response Time (ms)")
+```
+
+```{r Flanker visualisations}
+# summarise data for graph
+meanRT_flanker <- flanker %>% group_by(grade, NynBok) %>%     
+  summarise(Con_RT = mean(FlankerConMeanRT, na.rm=T),
+                      Inc_RT = mean(FlaIncMeanRT, na.rm=T),
+                      Con_se = sd(FlankerConMeanRT, na.rm=T) / sqrt(n()),
+                      Inc_se = sd(FlaIncMeanRT, na.rm=T) / sqrt(n()),
+                      meanACC = mean(CorrPerc, na.rm=T),
+                      seACC = sd(CorrPerc, na.rm=T) / sqrt(n()))
+
+# transform to long format
+meanRT_flanker_long <- meanRT_flanker %>%
+  pivot_longer(
+    cols = c(Con_RT, Inc_RT, Con_se, Inc_se),
+    names_to = c("Condition", ".value"),
+    names_pattern = "(Con|Inc)_(RT|se)"
+  )
+
+# plot for RT
+ggplot(data = meanRT_flanker_long, 
+       aes(x = Condition,
+           y = RT,
+           group = NynBok, 
+           color = NynBok)) + 
+    geom_point(size = 2) +
+    geom_line(size = 2) +
+    geom_errorbar(aes(ymin=RT-se, 
+                      ymax=RT+se, 
+                      colour = NynBok), width=.2, size = 2) +
+    facet_wrap(~grade) +
+    scale_x_discrete("Condition", 
+                     labels=c("congruent", "incongruent")) +
+    scale_color_manual("Language \ngroup", 
+                       values = c("#440154FF", "#2A788EFF"), 
+                       labels = c("Bokmål", "Nynorsk")) +
+    xlab('') +
+    ylab('Reaction time (ms)') +
+    fontsizes
+
+# plot for accuracy  
+ggplot(data = meanRT_flanker_long, 
+       aes(x = grade,
+           y = meanACC,
+           group = NynBok, 
+           color = NynBok)) + 
+    geom_point(size = 2) +
+    geom_line(size = 2) +
+    geom_errorbar(aes(ymin=meanACC-seACC, 
+                      ymax=meanACC+seACC, 
+                      colour = NynBok), width=.2, size = 2) +
+    scale_color_manual("Language \ngroup", 
+                       values = c("#440154FF", "#2A788EFF"), 
+                       labels = c("Bokmål", "Nynorsk")) +
+    xlab('') +
+    ylab('Accuracy (%)') +
+    fontsizes
+```
+
+```{r Flanker shifting}
+# read in data for Shifting effect
+shifting <- read_delim("./Flanker_shifting.csv", 
+    delim = ";", escape_double = FALSE, trim_ws = TRUE)
+
+# inspect
+shifting %>% group_by(grade, NynBok) %>% 
+            summarise(meanBlue = mean(FlaBluMeanRT, na.rm = T),
+                      meanPink = mean(FlaPiMeanRT, na.rm = T),
+                      meanShift = mean(FlaBlPiMeanRT, na.rm = T))
+
+# create shifting tibble
+shifting <- shifting %>% 
+  mutate(shift = FlaBlPiMeanRT) %>%
+  mutate(non.shift = rowMeans(cbind(FlaBluMeanRT, 
+                                    FlaPiMeanRT), na.rm = T)) %>% 
+  mutate(shiftEff = shift - non.shift)
+
+# make tibble long
+shift_long <- shifting %>%
+  pivot_longer(
+    cols = c(shift, non.shift),
+    names_to = "type",
+    values_to = "meanRT"
+  ) %>% 
+  select(code, NynBok, grade, type, meanRT)
+
+# summarise RTs for graph
+meanRT_shift <- shifting %>% group_by(grade, NynBok) %>%     
+  summarise(meanShift = mean(shift, na.rm=T),
+            seShift = sd(shift, na.rm = T) / sqrt(n()),
+            meanNonShift = mean(non.shift, na.rm = T),
+            seNonShift = sd(non.shift, na.rm = T) / sqrt(n()))
+
+# transform tibble to long format
+meanRT_shift_long <- meanRT_shift %>%
+  pivot_longer(
+    cols = c(meanShift, seShift, meanNonShift, seNonShift),
+    names_to = c(".value", "Condition"),
+    names_pattern = "(mean|se)(Shift|NonShift)"
+  )
+
+# plot RTs
+ggplot(data = meanRT_shift_long, 
+       aes(x = Condition,
+           y = mean,
+           group = NynBok, 
+           color = NynBok)) + 
+    geom_point(size = 2) +
+    geom_line(linewidth = 2) +
+    geom_errorbar(aes(ymin = mean - se, 
+                      ymax = mean + se, 
+                      colour = NynBok), width=.2, size = 2) +
+    facet_wrap(~grade) +
+    scale_x_discrete("Condition", 
+                     labels=c("non-shift", "shift")) +
+    scale_color_manual("Language \ngroup", 
+                       values = c("#440154FF", "#2A788EFF"), 
+                       labels = c("Bokmål", "Nynorsk")) +
+    xlab('') +
+    ylab('Reaction time (ms)') +
+    fontsizes
+
+# put in table
+shifting %>% group_by(grade, NynBok) %>% 
+     summarise(meanEff = mean(shiftEff, na.rm = T),
+               sdEff = sd(shiftEff, na.rm = T),
+               meanShift = mean(shift, na.rm = T),
+               sdShift = sd(shift, na.rm = T),
+               meanNonShift = mean(non.shift, na.rm = T),
+               sdNonShift = sd(non.shift, na.rm = T))
+
+# ANOVAs
+aov_car(shiftEff ~ grade*NynBok + Error(code), data = shifting)
+aov_car(shiftEff ~ NynBok + Error(code), 
+        data = subset(shifting, grade == "grade8"))
+
+# post-hoc t-tests grade 8:
+RTshift_aov8 <- aov_car(shiftEff ~ NynBok + Error(code), 
+                 data = subset(shifting, grade == "grade8"))
+RTshift8.emm <- emmeans(RTshift_aov8, ~NynBok)
+RTshift8.emm
+pairs(RTshift8.emm, adjust="bonferroni")
+```
+
+```{r Lexical Decision}
+# create long tibble from lexd-df
+lexd_long <- lexd %>%
+  mutate(LexDiff = WordCorrRT - NonWcorrRT) %>% 
+  pivot_longer(
+    cols = c(NonWcorrRT, WordCorrRT), # Columns to pivot into longer format
+    names_to = "condition", # New column for the names of the pivoted columns
+    values_to = "RT", # New column for the values of the pivoted columns
+    names_prefix = "", # Remove prefix if needed, adjust as necessary
+    names_transform = list(condition = function(x) case_when(
+      x == "NonWcorrRT" ~ "NonW",
+      x == "WordCorrRT" ~ "Word",
+      TRUE ~ x # Fallback case, should not be needed here
+    ))
+  )
+
+# calculate accuracy from absolute numbers in df
+lexd_long <- lexd_long %>%
+    mutate(accuracy = if_else(condition == "NonW",
+                              NonWcorr / 20 * 100,
+                              wordCorr / 40 * 100))
+
+# ANOVAs
+RTlexd <- aov_car(RT ~ condition + grade*NynBok + Error(code/condition),
+        data = lexd_long)
+aov_car(accuracy ~ condition + grade*NynBok +
+                        Error(code/condition), data = lexd_long)
+
+# post-hoc t-tests grade 8
+RTlexd_aov8 <- aov_car(RT ~ condition + NynBok + Error(code/condition), 
+                 data = subset(lexd_long, grade == "grade8"))
+RTlexd8.emm <- emmeans(RTlexd_aov8, ~NynBok)
+RTlexd8.emm
+pairs(RTlexd8.emm, adjust="bonferroni")
+emmeans(RTlexd_aov8, pairwise ~ NynBok | condition)
+emmeans(RTlexd_aov8, pairwise ~ NynBok)
+
+ACClexd_aov8 <- aov_car(accuracy ~ condition + NynBok +
+                          Error(code/condition), 
+                 data = subset(lexd_long, grade == "grade8"))
+ACClexd8.emm <- emmeans(ACClexd_aov8, ~NynBok)
+ACClexd8.emm
+pairs(ACClexd8.emm, adjust="bonferroni")
+emmeans(ACClexd_aov8, pairwise ~ NynBok | condition)
+
+# check for speed-accuracy trade-off
+lexd_speedacc <- lexd_long %>% 
+  filter(grade == "grade8") %>% 
+  group_by(code) %>% 
+  summarise(meanACC = mean(LexCorr, na.rm = T),
+            meanRT = mean(RT, na.rm = T))
+
+# plot speed-accuracy trade-off
+ggplot(lexd_speedacc, aes(x = meanACC, y = meanRT)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE) +
+    labs(title = "Speed-Accuracy Trade-off in LD task",
+         x = "Accuracy Score",
+         y = "Response Time (ms)")
+
+# check correlation speed-acc
+lexd_speedacc %>%
+           summarize(correlation = cor(meanACC, meanRT, 
+                                       use = "complete.obs"))
+
+```
+
+```{r Lexical Decision visualisation}
+# summarise data for graph
+mean.RT_lexd <- lexd_long %>% 
+            group_by(grade, NynBok, condition) %>% 
+            summarise(meanRT = mean(RT,na.rm=T),
+                      seRT = sd(RT, na.rm=T) / sqrt(n()),
+                      meanACC = mean(accuracy,na.rm=T),
+                      seACC = sd(accuracy, na.rm=T) / sqrt(n())) %>% 
+            arrange(NynBok)
+
+# plot summarised data for ACC or RT
+ggplot(data = mean.RT_lexd, 
+       aes(x = condition,
+           y = meanRT,
+           group = NynBok, 
+           color = NynBok)) + 
+    geom_point(size = 2) +
+    geom_line(size = 2) +
+    geom_errorbar(aes(ymin = meanRT-seRT, 
+                      ymax = meanRT+seRT, 
+                      colour = NynBok), width=.2, size = 2) +
+    facet_wrap(~grade) +
+    scale_x_discrete("Condition", 
+                     labels = c("non-word", "word")) +
+    scale_color_manual("Language \ngroup", 
+                       values = c("#440154FF", "#2A788EFF"), 
+                       labels = c("Bokmål", "Nynorsk")) +
+    ylab('Reaction time (ms)') +
+    fontsizes
+
+# plot summarised data for ACC
+ggplot(data = mean.RT_lexd, 
+       aes(x = condition,
+           y = meanACC,
+           group = NynBok, 
+           color = NynBok)) + 
+    geom_point(size = 2) +
+    geom_line(size = 2) +
+    geom_errorbar(aes(ymin = meanACC-seACC, 
+                      ymax = meanACC+seACC, 
+                      colour = NynBok), width=.2, size = 2) +
+    facet_wrap(~grade) +
+    scale_x_discrete("Condition", 
+                     labels = c("non-word", "word")) +
+    scale_color_manual("Language \ngroup", 
+                       values = c("#440154FF", "#2A788EFF"), 
+                       labels = c("Bokmål", "Nynorsk")) +
+    ylab('Accuracy (%)') +
+    fontsizes
+```
+
+#Exam data regressions
+```{r Correlation matrix EFs}
+# Compute correlation matrix with p-values for EF tests
+corr_EF <- psych::corr.test(exam %>% 
+                            select(span_corr, #StroopRT, 
+                                   StroopCorr, Feff,
+                                   shiftEff, WordCorrRT))
+
+round(corr_EF$r, 2)
+round(corr_EF$p, 4)
+
+# Compute correlation matrix with p-values for academic results
+school_corr <- psych::corr.test(exam %>% 
+                                      select(Schoolperformance, NPLES08, 
+                                             NPREG08, NPENG08))
+
+round(school_corr$r, 2)
+round(school_corr$p, 4)
+```
+
+```{r Stepwise regression School performance}
+# prep df
+exam <- exam %>%  
+  mutate(
+    NynBok = factor(NynBok, levels = c("BM", "NN")),
+    parents = factor(parents, levels = c("single", "not.single")), 
+    mumwork = factor(mumwork, levels = c("no", "yes"))
+  )
+
+exam <- exam %>% filter_at(vars(age, mumwork, parents, NynBok, 
+                                span_corr, StroopRT, 
+                                Feff, shiftEff, WordCorrRT),
+                           all_vars(!is.na(.)))
+
+## READING ##
+exam_les <- exam %>% filter(!is.na(NPLES08))
+
+# step 0
+step0 <- lm(NPLES08 ~ 1, data = exam_les)
+summary(step0) # get unstandardized beta (B) and standard error for this (SE B)
+
+# step 1
+step1 <- lm(NPLES08 ~ age + mumwork + parents, data = exam_les)
+summary(step1) # get unstandardized beta (B) and standard error for this (SE B)
+glance(step1) # get R2
+lm.beta(step1) # get standardized beta
+anova(step0, step1)
+
+# step 2
+step2 <- lm(NPLES08 ~ age + mumwork + parents + NynBok, data = exam_les)
+summary(step2) # get unstandardized beta (B) and standard error for this (SE B)
+glance(step2) # get R2
+lm.beta(step2) # get standardized beta
+anova(step1, step2)
+
+# step 3
+step3 <- lm(NPLES08 ~ age + mumwork + parents + NynBok + 
+              span_corr + StroopCorr + Feff + shiftEff + WordCorrRT,
+              data = exam_les)
+summary(step3) # get unstandardized beta (B) and standard error for this (SE B)
+glance(step3) # get R2
+lm.beta(step3) # get standardized beta
+anova(step2, step3)
+
+# test unique variance StroopCorr
+noStroop <- lm(NPLES08 ~ age + mumwork + parents + NynBok + 
+              span_corr + Feff + shiftEff + WordCorrRT,
+              data = exam_les)
+glance(noStroop)
+anova(noStroop, step3)
+
+# test unique variance WordCorrRT
+noWordCorr <- lm(NPLES08 ~ age + mumwork + parents + NynBok + 
+              span_corr + StroopCorr + Feff + shiftEff,
+              data = exam_les)
+glance(noWordCorr)
+anova(noWordCorr, step3)
+
+
+## ARITHMETIC ##
+exam_matte <- exam %>% filter(!is.na(NPREG08))
+
+# step 0
+step0 <- lm(NPREG08 ~ 1, data = exam_matte)
+summary(step0) # get unstandardized beta (B) and standard error for this (SE B)
+
+# step 1
+step1 <- lm(NPREG08 ~ age + mumwork + parents, 
+            data = exam_matte)
+summary(step1) # get unstandardized beta (B) and standard error for this (SE B)
+glance(step1) # get R2
+lm.beta(step1) # get standardized beta
+anova(step0, step1)
+
+# step 2
+step2 <- lm(NPREG08 ~ age + mumwork + parents + NynBok,
+            data = exam_matte)
+summary(step2) # get unstandardized beta (B) and standard error for this (SE B)
+glance(step2) # get R2
+lm.beta(step2) # get standardized beta
+anova(step1, step2)
+
+# step 3
+step3 <- lm(NPREG08 ~ age + mumwork + parents + NynBok 
+          + span_corr + StroopCorr + Feff + shiftEff + WordCorrRT,
+          data = exam_matte)
+summary(step3) # get unstandardized beta (B) and standard error for this (SE B)
+glance(step3) # get R2
+lm.beta(step3) # get standardized beta
+anova(step2, step3)
+
+# test unique variance VSWM
+span_matte <- lm(NPREG08 ~ age + mumwork + parents + NynBok 
+           + StroopCorr + Feff + shiftEff + WordCorrRT,
+          data = exam_matte)
+glance(span_matte)
+anova(span_matte, step3)
+
+
+## ENGLISH ##
+exam_eng <- exam %>% filter(!is.na(NPENG08))
+
+# step 0
+step0 <- lm(NPENG08 ~ 1, data = exam_eng)
+tidy(step0) # get unstandardized beta (B) and standard error for this (SE B)
+
+# step 1
+step1 <- lm(NPENG08 ~ age + mumwork + parents, 
+            data = exam_eng)
+summary(step1) # get unstandardized beta (B) and standard error for this (SE B)
+glance(step1) # get R2
+lm.beta(step1) # get standardized beta
+anova(step0, step1)
+
+# step 2
+step2 <- lm(NPENG08 ~ age + mumwork + parents + NynBok, 
+            data = exam_eng)
+summary(step2) # get unstandardized beta (B) and standard error for this (SE B)
+glance(step2) # get R2
+lm.beta(step2) # get standardized beta
+anova(step1, step2)
+
+# step 3
+step3 <- lm(NPENG08 ~ age + mumwork + parents + NynBok +
+              span_corr + StroopCorr + Feff + shiftEff + WordCorrRT,
+              data = exam_eng)
+summary(step3) # get unstandardized beta (B) and standard error for this (SE B)
+glance(step3) # get R2
+lm.beta(step3) # get standardized beta
+anova(step2, step3)
+
+# test unique variance Shifting English
+noShift <- lm(NPENG08 ~ age + mumwork + parents + NynBok + 
+              span_corr + StroopCorr + Feff + WordCorrRT,
+              data = exam_eng)
+glance(noShift)
+anova(noShift, step3)
+
+# test unique variance WordCorrRT English
+noWordCorr <- lm(NPENG08 ~ age + mumwork + parents + NynBok + 
+              span_corr + StroopCorr + Feff + shiftEff,
+              data = exam_eng)
+glance(noWordCorr)
+anova(noWordCorr, step3)
+
+
+## SCHOOL PERFORMANCE ##
+exam_school <- exam %>% filter(!is.na(Schoolperformance))
+
+# step 0
+step0 <- lm(Schoolperformance ~ 1, data = exam_school)
+
+# step 1
+step1 <- lm(Schoolperformance ~ age + mumwork + parents, 
+            data = exam_school)
+summary(step1)
+glance(step1) # get R2
+lm.beta(step1) # get standardized beta
+anova(step0, step1)
+
+# step 2
+step2 <- lm(Schoolperformance ~ age + mumwork + parents + NynBok,
+            data = exam_school)
+summary(step2) # get unstandardized beta (B) and standard error for this (SE B)
+glance(step2) # get R2
+lm.beta(step2) # get standardized beta
+anova(step1, step2)
+
+# step 3
+step3 <- lm(Schoolperformance ~ age + mumwork + parents + NynBok +
+              span_corr + StroopCorr + Feff + shiftEff + WordCorrRT,
+              data = exam_school)
+summary(step3) # get unstandardized beta (B) and standard error for this (SE B)
+glance(step3) # get R2
+lm.beta(step3) # get standardized beta
+anova(step2, step3)
+
+# test unique variance StroopCorr
+noStroop <- lm(Schoolperformance ~ age + mumwork + parents + NynBok + 
+              span_corr + Feff + shiftEff + WordCorrRT,
+              data = exam_school)
+glance(noStroop)
+anova(noStroop, step3)
+```
